@@ -4,94 +4,53 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-# 1. 时间配置：计算北京时间和 T-2 净值日期
-beijing_tz = timezone(timedelta(hours=8))
-now_bj = datetime.now(beijing_tz)
-# 自动计算 T-2 日期 (例如今天 03-11，显示 03-09)
-t2_date_str = (now_bj - timedelta(days=2)).strftime('%m-%d')
-now_str = now_bj.strftime('%Y-%m-%d %H:%M:%S')
+# 1. 时间配置 (北京时间 T-2)
+bj_tz = timezone(timedelta(hours=8))
+now = datetime.now(bj_tz)
+t2_date = (now - timedelta(days=2)).strftime('%m-%d')
+st.set_page_config(page_title="LOF专业监控", layout="wide")
 
-# 2. 页面配置：专业宽屏模式
-st.set_page_config(page_title="LOF专业套利监控", layout="wide")
-
-# --- 核心配置：关联基金与指数 ---
-FUND_META = {
-    "160723": {"idx": "gb_799001", "tg": "原油指数", "fe": "1.50%"},
-    "160416": {"idx": "gb_799001", "tg": "标普油气", "fe": "1.50%"},
-    "501018": {"idx": "gb_799001", "tg": "南方原油", "fe": "1.50%"},
-    "162411": {"idx": "gb_XBI", "tg": "标普生物", "fe": "1.20%"},
-    "161226": {"idx": "sz399991", "tg": "白银期货", "fe": "0.60%"},
-    "161129": {"idx": "gb_XAU", "tg": "黄金主题", "fe": "1.50%"}
+# 2. 基金配置
+META = {
+    "160723": {"idx": "gb_799001", "tg": "原油指数"},
+    "160416": {"idx": "gb_799001", "tg": "标普油气"},
+    "501018": {"idx": "gb_799001", "tg": "南方原油"},
+    "162411": {"idx": "gb_XBI", "tg": "标普生物"},
+    "161226": {"idx": "sz399991", "tg": "白银期货"},
+    "161129": {"idx": "gb_XAU", "tg": "黄金主题"}
 }
-FUNDS = [
-    {"s": "sz160723", "id": "160723"}, {"s": "sz160416", "id": "160416"},
-    {"s": "sh501018", "id": "501018"}, {"s": "sz162411", "id": "162411"},
-    {"s": "sz161226", "id": "161226"}, {"s": "sz161129", "id": "161129"}
-]
+FUNDS = ["sz160723", "sz160416", "sh501018", "sz162411", "sz161226", "sz161129"]
 
-def get_data():
-    """从新浪接口批量获取实时行情"""
-    s_list = [f["s"] for f in FUNDS] + list(set([m["idx"] for m in FUND_META.values()]))
-    url = f"http://hq.sinajs.cn/list={','.join(s_list)}"
-    headers = {"Referer": "http://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
+def get_raw():
+    ids = FUNDS + list(set([m["idx"] for m in META.values()]))
+    url = f"http://hq.sinajs.cn/list={','.join(ids)}"
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers={"Referer": "http://finance.sina.com.cn"}, timeout=10)
         r.encoding = 'gbk'
         return r.text
     except: return None
 
-def calculate_idx_chg(idx_code, parts):
-    """专门处理全球指数(gb_)和国内指数的涨跌幅解析"""
-    try:
-        if "gb_" in idx_code:
-            # 全球指数：parts[3] 是新浪直接返回的实时涨跌百分比
-            return f"{float(parts[3]):+.2f}%" if len(parts) > 3 else "0.00%"
-        else:
-            # 国内指数：使用 (当前价 - 昨收) / 昨收
-            now, pre = float(parts[3]), float(parts[2])
-            return f"{((now - pre) / pre * 100):+.2f}%" if pre > 0 else "0.00%"
-    except: return "0.00%"
-
-# --- 核心修正点：确保函数名为 color_val ---
 def color_val(v):
-    """数值着色：红涨绿跌"""
     if not isinstance(v, str) or '%' not in v: return ''
-    try:
-        val = float(v.replace('%', '').replace('+', ''))
-        return f'color: {"#f87171" if val > 0 else "#4ade80"}; font-weight: bold;'
-    except: return ''
+    val = float(v.replace('%', '').replace('+', ''))
+    return f'color: {"#f87171" if val > 0 else "#4ade80"}; font-weight: bold;'
 
 st.title("🛡️ LOF 基金专业行情看板")
-st.caption(f"北京时间：{now_str} | 自动刷新：30秒")
+st.caption(f"更新时间：{now.strftime('%H:%M:%S')} | 刷新：30秒")
 
-raw = get_data()
+raw = get_raw()
 if raw:
     data = {m[0]: m[1].split(',') for m in re.findall(r'hq_str_(.*?)=\"(.*?)\";', raw)}
     rows = []
-    
-    for f in FUNDS:
-        fid, sid = f["id"], f["s"]
-        meta = FUND_META[fid]
-        fd = data.get(sid)
+    for sid in FUNDS:
+        fid = sid[2:]
+        meta, fd = META[fid], data.get(sid)
         idat = data.get(meta["idx"])
-        
         if not fd or len(fd) < 5: continue
 
+        # 核心解析逻辑
         price, last, iopv = float(fd[3]), float(fd[2]), float(fd[1])
-        chg = ((price - last) / last * 100) if last > 0 else 0
-        pre = ((price - iopv) / iopv * 100) if iopv > 0 else 0
-        vol = float(fd[9]) / 10000 if len(fd) > 9 else 0
+        chg = f"{((price - last) / last * 100):+.2f}%" if last > 0 else "0.00%"
+        pre = f"{((price - iopv) / iopv * 100):+.2f}%" if iopv > 0 else "0.00%"
         
-        # 指数解析
-        idx_chg_display = calculate_idx_chg(meta["idx"], idat) if idat else "--"
-
-        rows.append({
-            "代码": fid, 
-            "名称": fd[0][:4], 
-            "现价": f"{price:.3f}",
-            "涨幅": f"{chg:+.2f}%", 
-            "成交(万)": f"{vol:.1f}",
-            "T-2净值": f"{iopv:.4f}", 
-            "T-2净值日期": t2_date_str,
-            "相关标的": meta["tg"], 
-            "T-
+        # 指数涨幅逻辑 (gb_ 索引 3, 国内索引 (3-2)/
