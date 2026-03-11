@@ -53,4 +53,25 @@ if raw:
         chg = f"{((price - last) / last * 100):+.2f}%" if last > 0 else "0.00%"
         pre = f"{((price - iopv) / iopv * 100):+.2f}%" if iopv > 0 else "0.00%"
         
-        # 指数涨幅逻辑 (gb_ 索引 3, 国内索引 (3-2)/
+        # 指数涨幅逻辑 (gb_ 索引 3, 国内索引 (3-2)/2)
+        idx_chg = "--"
+        if idat:
+            if "gb_" in meta["idx"]:
+                idx_chg = f"{float(idat[3]):+.2f}%" if len(idat) > 3 else "0.00%"
+            else:
+                p_now, p_pre = float(idat[3]), float(idat[2])
+                idx_chg = f"{((p_now - p_pre) / p_pre * 100):+.2f}%" if p_pre > 0 else "0.00%"
+
+        rows.append({
+            "代码": fid, "名称": fd[0][:4], "现价": f"{price:.3f}",
+            "涨幅": chg, "成交(万)": f"{float(fd[9])/10000:.1f}",
+            "T-2净值": f"{iopv:.4f}", "T-2日期": t2_date,
+            "标的": meta["tg"], "T-1指数涨幅": idx_chg, "溢价率": pre
+        })
+
+    df = pd.DataFrame(rows).sort_values("溢价率", ascending=False)
+    st.dataframe(df.style.applymap(color_val, subset=['涨幅', '溢价率', 'T-1指数涨幅']), 
+                 use_container_width=True, hide_index=True, height=450)
+    if st.button('🔄 刷新报价'): st.rerun()
+else:
+    st.error("行情抓取中，请稍后...")
