@@ -15,7 +15,6 @@ now_str = now_bj.strftime('%Y-%m-%d %H:%M:%S')
 st.set_page_config(page_title="LOF专业套利监控", layout="wide")
 
 # --- 核心配置：关联基金与指数 ---
-# idx: 关联指数代码，用于计算 T-1 指数涨幅
 FUND_META = {
     "160723": {"idx": "gb_799001", "tg": "原油指数", "fe": "1.50%"},
     "160416": {"idx": "gb_799001", "tg": "标普油气", "fe": "1.50%"},
@@ -45,15 +44,16 @@ def calculate_idx_chg(idx_code, parts):
     """专门处理全球指数(gb_)和国内指数的涨跌幅解析"""
     try:
         if "gb_" in idx_code:
-            # 全球指数：parts[1]当前价, parts[26]昨收, parts[3]实时涨跌幅字符串
+            # 全球指数：parts[3] 是新浪直接返回的实时涨跌百分比
             return f"{float(parts[3]):+.2f}%" if len(parts) > 3 else "0.00%"
         else:
-            # 国内指数：parts[3]当前价, parts[2]昨收
+            # 国内指数：使用 (当前价 - 昨收) / 昨收
             now, pre = float(parts[3]), float(parts[2])
             return f"{((now - pre) / pre * 100):+.2f}%" if pre > 0 else "0.00%"
     except: return "0.00%"
 
-def color_v(v):
+# --- 核心修正点：确保函数名为 color_val ---
+def color_val(v):
     """数值着色：红涨绿跌"""
     if not isinstance(v, str) or '%' not in v: return ''
     try:
@@ -77,13 +77,12 @@ if raw:
         
         if not fd or len(fd) < 5: continue
 
-        # 基础数据
         price, last, iopv = float(fd[3]), float(fd[2]), float(fd[1])
         chg = ((price - last) / last * 100) if last > 0 else 0
         pre = ((price - iopv) / iopv * 100) if iopv > 0 else 0
         vol = float(fd[9]) / 10000 if len(fd) > 9 else 0
         
-        # 指数解析 (修正 T-1 涨幅逻辑)
+        # 指数解析
         idx_chg_display = calculate_idx_chg(meta["idx"], idat) if idat else "--"
 
         rows.append({
@@ -93,23 +92,6 @@ if raw:
             "涨幅": f"{chg:+.2f}%", 
             "成交(万)": f"{vol:.1f}",
             "T-2净值": f"{iopv:.4f}", 
-            "T-2净值日期": t2_date_str, # 按照要求修改
+            "T-2净值日期": t2_date_str,
             "相关标的": meta["tg"], 
-            "T-1指数涨幅": idx_chg_display, 
-            "溢价率": f"{pre:+.2f}%"
-        })
-
-    # 生成数据表并按照溢价率降序排列
-    df = pd.DataFrame(rows).sort_values("溢价率", ascending=False)
-    
-    # 渲染增强型表格
-    st.dataframe(
-        df.style.applymap(color_val, subset=['涨幅', '溢价率', 'T-1指数涨幅']), 
-        use_container_width=True, 
-        hide_index=True,
-        height=450
-    )
-    
-    if st.button('🔄 立即手动刷新行情'): st.rerun()
-else:
-    st.error("行情抓取中，请稍后...")
+            "T-
