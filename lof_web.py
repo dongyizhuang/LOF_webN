@@ -29,6 +29,7 @@ def get_sina():
     except: return {}
 
 def get_nav(fid):
+    # 天天基金官方接口
     url = f"https://fundmobapi.eastmoney.com/FundMApi/FundNetList.ashx?FCODE={fid}&PAGEINDEX=1&PAGESIZE=1"
     try:
         res = requests.get(url, timeout=10).json()
@@ -55,37 +56,3 @@ rows = []
 
 if data:
     for fid in FUNDS:
-        sid = f"sh{fid}" if fid.startswith('5') else f"sz{fid}"
-        fd = data.get(sid)
-        idat = data.get(META[fid])
-        t1_nav, t1_dt = get_nav(fid)
-        
-        if not fd or len(fd) < 5: continue
-
-        # 价格逻辑
-        p_curr = float(fd[3])
-        p_last = float(fd[2])
-        
-        # 涨幅计算
-        if p_last > 0:
-            c_val = (p_curr - p_last) / p_last * 100
-            c_str = "{:+.2f}%".format(c_val)
-        else:
-            c_str = "0.00%"
-            
-        # 指数涨幅
-        i_str = "0.00%"
-        if idat and len(idat) > 3:
-            if "gb_" in META[fid]:
-                iv = float(idat[3])
-                i_str = "{:+.2f}%".format(iv)
-            else:
-                inow, ipre = float(idat[3]), float(idat[2])
-                if ipre > 0:
-                    iv = (inow - ipre) / ipre * 100
-                    i_str = "{:+.2f}%".format(iv)
-
-        # 溢价率
-        pre_str = "--"
-        if t1_nav > 0:
-            pv = (p_curr - t1
