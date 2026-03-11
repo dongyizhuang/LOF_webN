@@ -4,108 +4,135 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-# 1. 基础设置
+# 1. 基础配置
 bj_tz = timezone(timedelta(hours=8))
 now = datetime.now(bj_tz)
-st.set_page_config(page_title="LOF T-1看板", layout="wide")
+st.set_page_config(page_title="LOF T-1 精准看板", layout="wide")
 
-# 2. 数据配置
+# 2. 基金配置
 META = {
-    "160723": "gb_799001", "160416": "gb_799001",
-    "501018": "gb_799001", "162411": "gb_799001",
-    "161226": "sz399991", "161129": "gb_XAU"
+    "160723": {"idx": "gb_799001", "tg": "原油指数"},
+    "160416": {"idx": "gb_799001", "tg": "标普油气"},
+    "501018": {"idx": "gb_799001", "tg": "南方原油"},
+    "162411": {"idx": "gb_799001", "tg": "华宝油气"},
+    "161226": {"idx": "sz399991", "tg": "白银期货"},
+    "161129": {"idx": "gb_XAU", "tg": "黄金主题"}
 }
 FUNDS = ["160723", "160416", "501018", "162411", "161226", "161129"]
 
-def get_sina():
-    ids = [f"sh{f}" if f.startswith('5') else f"sz{f}" for f in FUNDS]
-    idxs = list(set(META.values()))
-    url = f"https://hq.sinajs.cn/list={','.join(ids + idxs)}"
-    head = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
+def get_sina_price():
+    """获取场内价格和指数 (新浪行情接口)"""
+    symbols = [f"sh{f}" if f.startswith('5') else f"sz{f}" for f in FUNDS]
+    idx_symbols = list(set([m["idx"] for m in META.values()]))
+    # 使用 https 协议提高稳定性
+    url = f"https://hq.sinajs.cn/list={','.join(symbols + idx_symbols)}"
+    headers = {
+        "Referer": "https://finance.sina.com.cn",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
     try:
-        r = requests.get(url, headers=head, timeout=10)
+        r = requests.get(url, headers=headers, timeout=10)
         r.encoding = 'gbk'
         return {m[0]: m[1].split(',') for m in re.findall(r'hq_str_(.*?)=\"(.*?)\";', r.text)}
-    except: return {}
+    except Exception as e:
+        st.error(f"价格接口请求失败: {e}")
+        return {}
 
-def get_nav(fid):
-    url = f"https://fundmobapi.eastmoney.com/FundMApi/FundNetList.ashx?FCODE={fid}&PAGEINDEX=1&PAGESIZE=1"
+def get_tt_official_nav(fid):
+    """获取天天基金官方最新公布的单位净值"""
+    # 接口1：移动端净值列表接口 (最准)
+    url = f"https://fundmobapi.eastmoney.com/FundMApi/FundNetList.ashx?FCODE={fid}&PAGEINDEX=1&PAGESIZE=1&deviceid=123456&plat=Android"
     try:
-        res = requests.get(url, timeout=10).json()
+        r = requests.get(url, timeout=10)
+        res = r.json()
         if res and "Datas" in res and len(res["Datas"]) > 0:
-            d = res["Datas"][0]
-            return float(d['DWJZ']), d['FSRQ']
-    except: pass
+            data = res["Datas"][0]
+            return float(data['DWJZ']), data['FSRQ']
+    except:
+        # 接口2：备用估值接口
+        try:
+            url_bak = f"https://fundgz.1234567.com.cn/js/{fid}.js"
+            r_bak = requests.get(url_bak, timeout=5)
+            content = re.search(r"\((.*)\)", r_bak.text).group(1)
+            import json
+            j = json.loads(content)
+            return float(j['dwjz']), j['jzrq']
+        except:
+            pass
     return 0.0, "--"
 
-def color_v(v):
+def color_val(v):
     if not isinstance(v, str) or '%' not in v: return ''
     try:
-        n = float(v.replace('%', '').replace('+', ''))
-        if n > 0: return 'color: #ef4444; font-weight: bold;'
-        if n < 0: return 'color: #22c55e; font-weight: bold;'
-    except: pass
-    return ''
+        val = float(v.replace('%', '').replace('+', ''))
+        return f'color: {"#f87171" if val > 0 else "#4ade80"}; font-weight: bold;'
+    except: return ''
 
-st.title("🛡️ LOF 基金 T-1 精准看板")
-st.caption(f"时间：{now.strftime('%H:%M:%S')} | 数据：新浪+天天官方")
+st.title("🛡️ LOF 基金 T-1 精准监控看板")
+st.caption(f"当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')} | 数据源：新浪(实时价) + 天天基金(官方净值)")
 
-data = get_sina()
+# 执行抓取
+sina_data = get_sina_price()
 rows = []
 
-if data:
+if sina_data:
     for fid in FUNDS:
-        # --- 注意：以下部分必须严格缩进 ---
-        sid = "sh" + fid if fid.startswith('5') else "sz" + fid
-        fd = data.get(sid)
-        idat = data.get(META[fid])
-        t1_nav, t1_dt = get_nav(fid)
+        symbol = f"sh{fid}" if fid.startswith('5') else f"sz{fid}"
+        meta = META[fid]
+        p_dat = sina_data.get(symbol)
+        i_dat = sina_data.get(meta["idx"])
         
-        if not fd or len(fd) < 5: 
+        # 获取 T-1 净值
+        t1_nav, t1_date = get_tt_official_nav(fid)
+        
+        # 即使净值暂时拿不到，也尝试解析价格数据
+        if not p_dat or len(p_dat) < 4: continue
+
+        try:
+            price = float(p_dat[3])
+            last = float(p_dat[2])
+            p_chg = f"{((price - last) / last * 100):+.2f}%" if last > 0 else "0.00%"
+            
+            # 指数涨幅解析
+            idx_chg = "--"
+            if i_dat and len(i_dat) > 3:
+                if "gb_" in meta["idx"]:
+                    idx_chg = f"{float(i_dat[3]):+.2f}%"
+                else:
+                    p_now, p_pre = float(i_dat[3]), float(i_dat[2])
+                    idx_chg = f"{((p_now - p_pre) / p_pre * 100):+.2f}%" if p_pre > 0 else "0.00%"
+
+            # 计算溢价率
+            premium = "--"
+            if t1_nav > 0:
+                premium = f"{((price - t1_nav) / t1_nav * 100):+.2f}%"
+
+            rows.append({
+                "代码": fid, 
+                "名称": p_dat[0][:4], 
+                "现价": f"{price:.3f}", 
+                "涨幅": p_chg,
+                "成交(万)": f"{float(p_dat[9])/10000:.1f}" if len(p_dat) > 9 else "0",
+                "T-1净值": f"{t1_nav:.4f}" if t1_nav > 0 else "等待更新",
+                "净值日期": t1_date,
+                "相关标的": meta["tg"], 
+                "指数涨幅": idx_chg, 
+                "溢价率": premium
+            })
+        except:
             continue
 
-        p_curr = float(fd[3])
-        p_last = float(fd[2])
-        
-        # 涨幅计算
-        c_str = "0.00%"
-        if p_last > 0:
-            c_val = (p_curr - p_last) / p_last * 100
-            c_str = "{:+.2f}%".format(c_val)
-            
-        # 指数涨幅
-        i_str = "0.00%"
-        if idat and len(idat) > 3:
-            if "gb_" in META[fid]:
-                i_str = "{:+.2f}%".format(float(idat[3]))
-            else:
-                p_n, p_p = float(idat[3]), float(idat[2])
-                if p_p > 0:
-                    iv = (p_n - p_p) / p_p * 100
-                    i_str = "{:+.2f}%".format(iv)
-
-        # 溢价率
-        pre_str = "--"
-        if t1_nav > 0:
-            pv = ((p_curr - t1_nav) / t1_nav) * 100
-            pre_str = "{:+.2f}%".format(pv)
-
-        # 构造行数据
-        item = {
-            "代码": fid, "名称": fd[0][:4], "现价": "{:.3f}".format(p_curr), 
-            "涨幅": c_str, "成交(万)": "{:.1f}".format(float(fd[9])/10000),
-            "T-1净值": "{:.4f}".format(t1_nav), "日期": t1_dt,
-            "指数涨幅": i_str, "溢价率": pre_str
-        }
-        rows.append(item)
-
-    # 排序与显示
     if rows:
         df = pd.DataFrame(rows).sort_values("溢价率", ascending=False)
-        st.dataframe(df.style.applymap(color_v, subset=['涨幅', '溢价率', '指数涨幅']), 
-                     use_container_width=True, hide_index=True)
-    
-    if st.button('🔄 刷新'): 
-        st.rerun()
+        st.dataframe(
+            df.style.applymap(color_val, subset=['涨幅', '溢价率', '指数涨幅']), 
+            use_container_width=True, 
+            hide_index=True, 
+            height=450
+        )
+        if st.button('🔄 强制刷新数据'):
+            st.rerun()
+    else:
+        st.warning("解析后的数据列表为空，请检查接口返回内容。")
 else:
-    st.error("获取数据失败")
+    st.error("无法获取新浪价格行情，请检查网络或稍后重试。")
