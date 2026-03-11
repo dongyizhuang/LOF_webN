@@ -9,46 +9,56 @@ bj_tz = timezone(timedelta(hours=8))
 now = datetime.now(bj_tz)
 st.set_page_config(page_title="LOF T-1 精准看板", layout="wide")
 
-# 2. 基金配置
+# 2. 基金配置 (去除了所有可能导致截断的长字符串)
 META = {
-    "160723": {"idx": "gb_799001", "tg": "原油指数"},
-    "160416": {"idx": "gb_799001", "tg": "标普油气"},
-    "501018": {"idx": "gb_799001", "tg": "南方原油"},
-    "162411": {"idx": "gb_799001", "tg": "华宝油气"},
-    "161226": {"idx": "sz399991", "tg": "白银期货"},
-    "161129": {"idx": "gb_XAU", "tg": "黄金主题"}
+    "160723": "gb_799001", "160416": "gb_799001",
+    "501018": "gb_799001", "162411": "gb_799001",
+    "161226": "sz399991", "161129": "gb_XAU"
 }
 FUNDS = ["160723", "160416", "501018", "162411", "161226", "161129"]
 
-def get_sina_price():
-    """获取场内价格和指数 (新浪行情接口)"""
-    symbols = [f"sh{f}" if f.startswith('5') else f"sz{f}" for f in FUNDS]
-    idx_symbols = list(set([m["idx"] for m in META.values()]))
-    # 使用 https 协议提高稳定性
-    url = f"https://hq.sinajs.cn/list={','.join(symbols + idx_symbols)}"
-    headers = {
-        "Referer": "https://finance.sina.com.cn",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    }
+def get_sina():
+    """获取价格"""
+    ids = [f"sh{f}" if f.startswith('5') else f"sz{f}" for f in FUNDS]
+    idxs = list(set(META.values()))
+    url = f"https://hq.sinajs.cn/list={','.join(ids + idxs)}"
+    headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=10)
         r.encoding = 'gbk'
         return {m[0]: m[1].split(',') for m in re.findall(r'hq_str_(.*?)=\"(.*?)\";', r.text)}
-    except Exception as e:
-        st.error(f"价格接口请求失败: {e}")
-        return {}
+    except: return {}
 
-def get_tt_official_nav(fid):
-    """获取天天基金官方最新公布的单位净值"""
-    # 接口1：移动端净值列表接口 (最准)
-    url = f"https://fundmobapi.eastmoney.com/FundMApi/FundNetList.ashx?FCODE={fid}&PAGEINDEX=1&PAGESIZE=1&deviceid=123456&plat=Android"
+def get_nav(fid):
+    """获取天天基金官方净值"""
+    url = f"https://fundmobapi.eastmoney.com/FundMApi/FundNetList.ashx?FCODE={fid}&PAGEINDEX=1&PAGESIZE=1"
     try:
-        r = requests.get(url, timeout=10)
-        res = r.json()
+        res = requests.get(url, timeout=10).json()
         if res and "Datas" in res and len(res["Datas"]) > 0:
-            data = res["Datas"][0]
-            return float(data['DWJZ']), data['FSRQ']
-    except:
-        # 接口2：备用估值接口
-        try:
-            url_bak = f"https://fundgz.1234
+            d = res["Datas"][0]
+            return float(d['DWJZ']), d['FSRQ']
+    except: pass
+    return 0.0, "--"
+
+def color_v(v):
+    if not isinstance(v, str) or '%' not in v: return ''
+    val = float(v.replace('%', '').replace('+', ''))
+    return f'color: {"#f87171" if val > 0 else "#4ade80"}; font-weight: bold;'
+
+st.title("🛡️ LOF 基金 T-1 精准监控看板")
+st.caption(f"当前时间：{now.strftime('%H:%M:%S')} | 混合数据源：新浪价+天天基金净值")
+
+data = get_sina()
+rows = []
+
+if data:
+    for fid in FUNDS:
+        sid = f"sh{fid}" if fid.startswith('5') else f"sz{fid}"
+        fd = data.get(sid)
+        idat = data.get(META[fid])
+        t1_nav, t1_dt = get_nav(fid)
+        
+        if not fd or len(fd) < 4: continue
+
+        price, last = float(fd[3]), float(fd[2])
+        chg = f"{((price - last) / last * 100):
