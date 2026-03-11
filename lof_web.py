@@ -49,10 +49,38 @@ def color_val(val):
     if not isinstance(val, str) or '%' not in val: return ''
     try:
         num = float(val.replace('%', '').replace('+', ''))
-        if num > 0: return 'color: #f87171; font-weight: bold;' # 红
-        if num < 0: return 'color: #4ade80; font-weight: bold;' # 绿
+        if num > 0: return 'color: #f87171; font-weight: bold;' # 红色表示上涨/溢价
+        if num < 0: return 'color: #4ade80; font-weight: bold;' # 绿色表示下跌/折价
     except: pass
     return ''
 
 st.title("🛡️ LOF 基金专业行情看板")
-st.caption(f"当前时间：{now_beijing
+# 修正报错行：确保大括号闭合
+st.caption(f"北京时间：{now_beijing} | 刷新频率：30秒")
+
+raw = get_all_data()
+if raw:
+    data_map = {m[0]: m[1].split(',') for m in re.findall(r'hq_str_(.*?)=\"(.*?)\";', raw)}
+    rows = []
+    
+    for f in FUNDS:
+        sid, fid = f["symbol"], f["id"]
+        meta = FUND_META[fid]
+        f_data = data_map.get(sid)
+        i_data = data_map.get(meta["idx_sid"])
+        
+        if not f_data or len(f_data) < 31: continue
+        
+        # 解析数据
+        name = f_data[0][:5]
+        price = float(f_data[3])      # 现价
+        last_close = float(f_data[2]) # 昨收
+        iopv = float(f_data[1])       # T-2净值 (LOF接口中此处对应参考净值)
+        amount_wan = float(f_data[9]) / 10000 # 成交额(万元)
+        
+        # 修正：新浪接口第30个字段是日期 "2026-03-11"
+        nav_date = f_data[30][5:10] if len(f_data) > 30 else "--"
+        
+        # 计算
+        change = ((price - last_close) / last_close * 100) if last_close > 0 else 0
+        premium = ((price - iopv) /
