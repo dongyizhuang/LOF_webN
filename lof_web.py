@@ -4,14 +4,14 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-###1. 强制定义北京时间 (UTC+8)
+##1. 强制定义北京时间 (UTC+8)
 beijing_tz = timezone(timedelta(hours=8))
 now_beijing = datetime.now(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')
 
-###2. 页面配置
+##2. 页面配置
 st.set_page_config(page_title="LOF专业监控", layout="wide")
 
-###3. 基金配置信息
+##3. 基金配置信息
 FUND_META = {
 "160723": {"idx_sid": "gb_799001", "target": "原油指数", "fee": "1.50%", "co": "嘉实基金"},
 "160416": {"idx_sid": "gb_799001", "target": "标普油气指数", "fee": "1.50%", "co": "华宝基金"},
@@ -31,24 +31,24 @@ FUNDS = [
 ]
 
 def get_all_data():
-fund_symbols = [f["symbol"] for f in FUNDS]
-index_symbols = list(set([m["idx_sid"] for m in FUND_META.values()]))
-all_symbols = ",".join(fund_symbols + index_symbols)
-url = f"{all_symbols}"
-headers = {"Referer": "", "User-Agent": "Mozilla/5.0"}
+    fund_symbols = [f["symbol"] for f in FUNDS]
+    index_symbols = list(set([m["idx_sid"] for m in FUND_META.values()]))
+    all_symbols = ",".join(fund_symbols + index_symbols)
+    url = f"{all_symbols}"
+    headers = {"Referer": "", "User-Agent": "Mozilla/5.0"}
 try:
-res = requests.get(url, headers=headers, timeout=10)
-res.encoding = 'gbk'
+    res = requests.get(url, headers=headers, timeout=10)
+    res.encoding = 'gbk'
 return res.text
 except:
 return None
 
 def color_val(val):
-if not isinstance(val, str) or '%' not in val: return ''
+    if not isinstance(val, str) or '%' not in val: return ''
 try:
-num = float(val.replace('%', '').replace('+', ''))
-if num > 0: return 'color: #ef4444; font-weight: bold;'
-if num < 0: return 'color: #22c55e; font-weight: bold;'
+    num = float(val.replace('%', '').replace('+', ''))
+    if num > 0: return 'color: #ef4444; font-weight: bold;'
+    if num < 0: return 'color: #22c55e; font-weight: bold;'
 except: pass
 return ''
 
