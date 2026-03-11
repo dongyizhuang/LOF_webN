@@ -4,91 +4,66 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-# 1. 强制定义北京时间 (UTC+8)
+1. 强制定义北京时间 (UTC+8)
 beijing_tz = timezone(timedelta(hours=8))
 now_beijing = datetime.now(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')
 
-# 页面配置
-st.set_page_config(page_title="LOF实时监控", layout="wide")
+2. 页面配置
+st.set_page_config(page_title="LOF专业监控", layout="wide")
 
-st.title("📊 LOF 基金实时溢价监控")
-# 显示北京时间
-st.caption(f"数据来源：新浪财经 | 北京时间：{now_beijing}")
+3. 基金配置信息
+FUND_META = {
+"160723": {"idx_sid": "gb_799001", "target": "原油指数", "fee": "1.50%", "co": "嘉实基金"},
+"160416": {"idx_sid": "gb_799001", "target": "标普油气指数", "fee": "1.50%", "co": "华宝基金"},
+"501018": {"idx_sid": "gb_799001", "target": "南方原油指数", "fee": "1.50%", "co": "南方基金"},
+"162411": {"idx_sid": "gb_XBI", "target": "标普生物科技", "fee": "1.20%", "co": "华宝基金"},
+"161226": {"idx_sid": "sz399991", "target": "白银期货指数", "fee": "0.60%", "co": "国投瑞银"},
+"161129": {"idx_sid": "gb_XAU", "target": "黄金主题指数", "fee": "1.50%", "co": "易方达"}
+}
 
-# 基金配置 (包含您新增的 161226 和 161129)
 FUNDS = [
-    {"symbol": "sz160723", "name": "嘉实原油"},
-    {"symbol": "sz160416", "name": "华宝油气"},
-    {"symbol": "sh501018", "name": "南方原油"},
-    {"symbol": "sz162411", "name": "华宝医疗"},
-    {"symbol": "sz161226", "name": "瑞银白银"},
-    {"symbol": "sz161129", "name": "黄金主题"}
+{"symbol": "sz160723", "id": "160723"},
+{"symbol": "sz160416", "id": "160416"},
+{"symbol": "sh501018", "id": "501018"},
+{"symbol": "sz162411", "id": "162411"},
+{"symbol": "sz161226", "id": "161226"},
+{"symbol": "sz161129", "id": "161129"}
 ]
 
-def get_data():
-    symbols = ",".join([f["symbol"] for f in FUNDS])
-    url = f"http://hq.sinajs.cn/list={symbols}"
-    headers = {
-        "Referer": "http://finance.sina.com.cn",
-        "User-Agent": "Mozilla/5.0"
-    }
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'gbk'
-        return response.text
-    except:
-        return None
+def get_all_data():
+fund_symbols = [f["symbol"] for f in FUNDS]
+index_symbols = list(set([m["idx_sid"] for m in FUND_META.values()]))
+all_symbols = ",".join(fund_symbols + index_symbols)
+url = f"{all_symbols}"
+headers = {"Referer": "", "User-Agent": "Mozilla/5.0"}
+try:
+res = requests.get(url, headers=headers, timeout=10)
+res.encoding = 'gbk'
+return res.text
+except:
+return None
 
-def color_style(val):
-    if isinstance(val, str) and '%' in val:
-        try:
-            num = float(val.replace('%', ''))
-            color = '#ef4444' if num > 0 else '#22c55e' # 红色/绿色
-            return f'color: {color}; font-weight: bold;'
-        except:
-            return ''
-    return ''
+def color_val(val):
+if not isinstance(val, str) or '%' not in val: return ''
+try:
+num = float(val.replace('%', '').replace('+', ''))
+if num > 0: return 'color: #ef4444; font-weight: bold;'
+if num < 0: return 'color: #22c55e; font-weight: bold;'
+except: pass
+return ''
 
-raw_data = get_data()
-if raw_data:
-    matches = re.findall(r'hq_str_(s[zh]\d+)=\"(.*?)\";', raw_data)
-    rows = []
-    
-    for symbol_code, content in matches:
-        parts = content.split(',')
-        if len(parts) < 5: continue
-        
-        price = float(parts[3])
-        last_close = float(parts[2])
-        iopv = float(parts[1])
-        
-        change = ((price - last_close) / last_close * 100) if last_close > 0 else 0
-        premium = ((price - iopv) / iopv * 100) if iopv > 0 else 0
-        
-        rows.append({
-            "市场": "上证" if symbol_code.startswith('sh') else "深市",
-            "代码": symbol_code[2:],
-            "名称": parts[0][:4],
-            "实时价格": f"{price:.3f}",
-            "当日涨跌": f"{change:+.2f}%",
-            "净值/IOPV": f"{iopv:.3f}",
-            "溢价率": f"{premium:+.2f}%"
-        })
+st.title("🛡️ LOF 基金专业行情看板")
+st.caption(f"北京时间：{now_beijing} | 自动刷新：30秒")
 
-    df = pd.DataFrame(rows)
-    
-    # 使用 st.dataframe 渲染，它在手机上支持横向滑动且更美观
-    st.dataframe(
-        df.style.applymap(color_style, subset=['当日涨跌', '溢价率']),
-        use_container_width=True,
-        hide_index=True
-    )
+raw = get_all_data()
+if raw:
+data_map = {m[0]: m[1].split(',') for m in re.findall(r'hq_str_(.?)="(.?)";', raw)}
+rows = []
+for f in FUNDS:
+sid, fid = f["symbol"], f["id"]
+meta, f_data = FUND_META[fid], data_map.get(sid)
+i_data = data_map.get(meta["idx_sid"])
+if not f_data or len(f_data) < 30: continue
+
 else:
-    st.error("数据获取失败，正在尝试重新连接...")
-
-# 刷新按钮
-if st.button('🔄 立即刷新数据'):
-    st.rerun()
-
-st.divider()
-st.info("💡 提示：场内价格相对于净值，红字代表溢价（买贵了），绿字代表折价（买便宜了）。")
+st.error("数据连接失败，请稍后重试。")
