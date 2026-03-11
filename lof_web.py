@@ -4,14 +4,14 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-1. 强制定义北京时间 (UTC+8)
+###1. 强制定义北京时间 (UTC+8)
 beijing_tz = timezone(timedelta(hours=8))
 now_beijing = datetime.now(beijing_tz).strftime('%Y-%m-%d %H:%M:%S')
 
-2. 页面配置
+###2. 页面配置
 st.set_page_config(page_title="LOF专业监控", layout="wide")
 
-3. 基金配置信息
+###3. 基金配置信息
 FUND_META = {
 "160723": {"idx_sid": "gb_799001", "target": "原油指数", "fee": "1.50%", "co": "嘉实基金"},
 "160416": {"idx_sid": "gb_799001", "target": "标普油气指数", "fee": "1.50%", "co": "华宝基金"},
